@@ -174,6 +174,14 @@ async def cmd_resumen(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("No hay datos del período actual.")
 
 
+async def cmd_cancelar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not solo_mi_chat(update):
+        return
+    chat_id = update.effective_chat.id
+    _ingresos_pendientes.pop(chat_id, None)
+    await update.message.reply_text("Listo, salí del flujo de ingresos. Los pendientes siguen guardados, retomá cuando quieras con /ingresos.")
+
+
 async def cmd_ingresos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Activa el flujo conversacional para resolver ingresos pendientes."""
     if not solo_mi_chat(update):
@@ -234,11 +242,12 @@ async def handle_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not solo_mi_chat(update):
         return
 
-    # Si hay gastos en cola de clasificación, procesarlos primero
-    if await handle_clasificacion_texto(update, context):
-        return
+    # Gastos en cola tienen prioridad absoluta
+    if db.count_clasificacion_queue() > 0:
+        if await handle_clasificacion_texto(update, context):
+            return
 
-    # Solo procesar ingreso si el usuario está en medio de esa conversación (activado por /ingresos)
+    # Ingresos solo si el usuario activó el flujo con /ingresos
     if _ingresos_pendientes.get(update.effective_chat.id):
         if await handle_ingreso_texto(update, context):
             return
@@ -726,6 +735,7 @@ def main():
     app.add_handler(CommandHandler("resumen", cmd_resumen))
     app.add_handler(CommandHandler("deudas", cmd_deudas))
     app.add_handler(CommandHandler("ingresos", cmd_ingresos))
+    app.add_handler(CommandHandler("cancelar", cmd_cancelar))
     app.add_handler(CallbackQueryHandler(handle_categoria_elegida, pattern=r"^cat:"))
     app.add_handler(CallbackQueryHandler(handle_categoria_elegida, pattern=r"^ing:"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_mensaje))
