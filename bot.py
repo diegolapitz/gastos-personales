@@ -730,6 +730,21 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_categoria_elegida, pattern=r"^ing:"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_mensaje))
 
+    async def on_startup(app):
+        pendientes_ing = len(db.get_ingresos_pendientes())
+        pendientes_cat = db.count_clasificacion_queue()
+        partes = []
+        if pendientes_cat:
+            partes.append(f"{pendientes_cat} gasto(s) para clasificar — escribi cualquier cosa para empezar")
+        if pendientes_ing:
+            partes.append(f"{pendientes_ing} ingreso(s) pendientes — manda /ingresos cuando quieras")
+        texto = "Bot iniciado." + ("\n\n" + "\n".join(partes) if partes else " Sin pendientes.")
+        try:
+            await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=texto)
+        except Exception as e:
+            logger.warning(f"No pude mandar aviso de inicio: {e}")
+
+    app.post_init = on_startup
     logger.info("Bot iniciado.")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
