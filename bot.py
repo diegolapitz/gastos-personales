@@ -174,6 +174,27 @@ async def cmd_resumen(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("No hay datos del período actual.")
 
 
+async def cmd_ingresos(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Activa el flujo conversacional para resolver ingresos pendientes."""
+    if not solo_mi_chat(update):
+        return
+    pendientes = db.get_ingresos_pendientes()
+    if not pendientes:
+        await update.message.reply_text("No hay ingresos pendientes.")
+        return
+    chat_id = update.effective_chat.id
+    primero = pendientes[0]
+    _ingresos_pendientes[chat_id] = primero
+    from importer_mp import limpiar_nombre
+    nombre = limpiar_nombre(primero["descripcion"]).replace("*","").replace("_"," ")
+    await update.message.reply_text(
+        f"{len(pendientes)} ingresos pendientes. Empecemos:\n\n"
+        f"+${primero['monto']:,.0f} el {primero['fecha']}\n"
+        f"{nombre}\n\n"
+        f"Que fue esto?".replace(",", ".")
+    )
+
+
 async def cmd_deudas(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not solo_mi_chat(update):
         return
@@ -217,9 +238,10 @@ async def handle_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await handle_clasificacion_texto(update, context):
         return
 
-    # Si hay un ingreso esperando respuesta en texto libre, procesarlo después
-    if await handle_ingreso_texto(update, context):
-        return
+    # Solo procesar ingreso si el usuario está en medio de esa conversación (activado por /ingresos)
+    if _ingresos_pendientes.get(update.effective_chat.id):
+        if await handle_ingreso_texto(update, context):
+            return
 
     texto = update.message.text.strip()
 
@@ -509,46 +531,44 @@ async def handle_clasificacion_texto(update: Update, context: ContextTypes.DEFAU
     db.upsert_regla(gasto["descripcion"].lower().strip(), categoria, orden=50)
     db.dequeue_clasificacion(gasto["id"])
 
-    # Ver si hay más en la cola
     siguiente = db.get_next_clasificacion()
     resto = db.count_clasificacion_queue()
 
     from importer_mp import limpiar_nombre
-    nombre_actual = limpiar_nombre(gasto["descripcion"])
 
-    if siguiente:
-        nombre_sig = limpiar_nombre(siguiente["descripcion"])
-        await msg_espera.edit_text(
-            f"OK *{nombre_actual}* -> *{categoria}*\n\n"
-            f"Siguiente ({resto} restantes):\n"
-            f"*{nombre_sig}*\n"
-            f"${siguiente['monto']:,.0f} — {siguiente['fecha']}\n\n"
-            f"Que fue esto?".replace(",", "."),
-            parse_mode="Markdown",
-        )
-    else:
-        await msg_espera.edit_text(
-            f"OK *{nombre_actual}* -> *{categoria}*\n\n"
-            f"Listo, clasificacion completa.",
-            parse_mode="Markdown",
-        )
-        # Enviar resumen del período actual
-        resumen = _resumen_periodo()
-        if resumen:
-            await update.message.reply_text(resumen, parse_mode="Markdown")
+    def safe(s):
+        return str(s).replace("*","").replace("_"," ").replace("`","").replace("[","").replace("]","")
+
+    nombre_actual = safe(limpiar_nombre(gasto["descripcion"]))
+
+    try:
+        if siguiente:
+            nombre_sig = safe(limpiar_nombre(siguiente["descripcion"]))
+            await msg_espera.edit_text(
+                f"OK {nombre_actual} -> {categoria}\n\n"
+                f"Siguiente ({resto} restantes):\n"
+                f"{nombre_sig}\n"
+                f"${siguiente['monto']:,.0f} - {siguiente['fecha']}\n\n"
+                f"Que fue esto?".replace(",", "."),
+            )
+        else:
+            await msg_espera.edit_text(
+                f"OK {nombre_actual} -> {categoria}\n\nListo, clasificacion completa."
+            )
+            resumen = _resumen_periodo()
+            if resumen:
+                await update.message.reply_text(resumen)
+    except Exception as e:
+        logger.error(f"Error editando mensaje clasificacion: {e}")
     return True
 
 
 async def handle_ingreso_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """El usuario explicó en texto libre qué fue un ingreso pendiente."""
     chat_id = update.effective_chat.id
-    # Primero memoria (activado por botón), después DB (activado por notificación sin botones)
     pendiente = _ingresos_pendientes.get(chat_id)
     if not pendiente:
-        pendientes_db = db.get_ingresos_pendientes()
-        if not pendientes_db:
-            return False
-        pendiente = pendientes_db[0]
+        return False
 
     texto = update.message.text.strip()
     msg_espera = await update.message.reply_text("Procesando...")
@@ -572,27 +592,33 @@ async def handle_ingreso_texto(update: Update, context: ContextTypes.DEFAULT_TYP
     if resultado.get("monto_neto_gasto"):
         neto_txt = f"\nGasto neto ajustado a *${resultado['monto_neto_gasto']:,.0f}*".replace(",", ".")
 
-    # Ver si hay más ingresos pendientes
+    _ingresos_pendientes.pop(chat_id, None)
     siguientes = db.get_ingresos_pendientes()
     siguiente = next((i for i in siguientes if i["id"] != pendiente["id"]), None)
-
     if siguiente:
-        from importer_mp import limpiar_nombre as _ln
-        nombre_sig = _ln(siguiente["descripcion"]).replace("_", " ").replace("*", "")
-        resto = len(siguientes) - 1
-        await msg_espera.edit_text(
-            f"OK: _{resumen}_{neto_txt}\n\n"
-            f"Siguiente ({resto} restantes):\n"
-            f"*+${siguiente['monto']:,.0f}* el {siguiente['fecha']}\n"
-            f"{nombre_sig}\n\n"
-            f"Que fue esto?".replace(",", "."),
-            parse_mode="Markdown",
-        )
-    else:
-        await msg_espera.edit_text(
-            f"OK: _{resumen}_{neto_txt}\n\nListo, no hay mas ingresos pendientes.",
-            parse_mode="Markdown",
-        )
+        _ingresos_pendientes[chat_id] = siguiente
+
+    def safe(s):
+        return str(s).replace("*","").replace("_"," ").replace("`","").replace("[","").replace("]","")
+
+    try:
+        if siguiente:
+            from importer_mp import limpiar_nombre as _ln
+            nombre_sig = safe(_ln(siguiente["descripcion"]))
+            resto = len(siguientes) - 1
+            await msg_espera.edit_text(
+                f"OK: {safe(resumen)}{neto_txt}\n\n"
+                f"Siguiente ({resto} restantes):\n"
+                f"+${siguiente['monto']:,.0f} el {siguiente['fecha']}\n"
+                f"{nombre_sig}\n\n"
+                f"Que fue esto?".replace(",", "."),
+            )
+        else:
+            await msg_espera.edit_text(
+                f"OK: {safe(resumen)}{neto_txt}\n\nListo, no hay mas ingresos pendientes."
+            )
+    except Exception as e:
+        logger.error(f"Error editando mensaje ingreso: {e}")
     return True
 
 
@@ -699,6 +725,7 @@ def main():
     app.add_handler(CommandHandler("estado", cmd_estado))
     app.add_handler(CommandHandler("resumen", cmd_resumen))
     app.add_handler(CommandHandler("deudas", cmd_deudas))
+    app.add_handler(CommandHandler("ingresos", cmd_ingresos))
     app.add_handler(CallbackQueryHandler(handle_categoria_elegida, pattern=r"^cat:"))
     app.add_handler(CallbackQueryHandler(handle_categoria_elegida, pattern=r"^ing:"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_mensaje))
