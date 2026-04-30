@@ -262,11 +262,12 @@ def _notificar_ingresos_pendientes():
 
 
 def _notificar_sin_clasificar():
-    """Manda por Telegram los gastos 'A Clasificar' del período actual para revisión."""
+    """Encola los gastos 'A Clasificar' para clasificación conversacional por Telegram."""
     try:
         from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
         import asyncio
-        from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
+        from telegram import Bot
+        from importer_mp import limpiar_nombre
 
         periodo = db.get_periodo_actual()
         if not periodo:
@@ -279,39 +280,30 @@ def _notificar_sin_clasificar():
             print("  Todos los movimientos quedaron categorizados.")
             return
 
-        print(f"  {len(pendientes)} movimientos sin clasificar — enviando a Telegram...")
+        print(f"  {len(pendientes)} movimientos sin clasificar — encolando para Telegram...")
 
-        categorias = db.get_categorias_gasto()
+        for g in pendientes:
+            db.enqueue_clasificacion(g["id"])
 
-        async def _enviar():
+        async def _avisar():
             bot = Bot(token=TELEGRAM_TOKEN)
+            primero = pendientes[0]
+            nombre = limpiar_nombre(primero["descripcion"])
             await bot.send_message(
                 chat_id=TELEGRAM_CHAT_ID,
-                text=f"*{len(pendientes)} movimientos necesitan categoria*\nRespondé cada uno con la categoría correcta:",
+                text=(
+                    f"*{len(pendientes)} movimientos para clasificar.*\n"
+                    f"Te voy preguntando de a uno.\n\n"
+                    f"Primero:\n"
+                    f"*{nombre}*\n"
+                    f"${primero['monto']:,.0f} — {primero['fecha']}\n\n"
+                    f"Que fue esto?"
+                ).replace(",", "."),
                 parse_mode="Markdown",
             )
-            for g in pendientes[:20]:  # máximo 20 para no saturar
-                from importer_mp import limpiar_nombre
-                nombre = limpiar_nombre(g["descripcion"])
-                teclado = [
-                    [InlineKeyboardButton(c, callback_data=f"cat:{g['id']}:{c}")]
-                    for c in categorias
-                ]
-                await bot.send_message(
-                    chat_id=TELEGRAM_CHAT_ID,
-                    text=f"*{nombre}*\n${g['monto']:,.0f} — {g['fecha']}".replace(",", "."),
-                    parse_mode="Markdown",
-                    reply_markup=InlineKeyboardMarkup(teclado),
-                )
-            if len(pendientes) > 20:
-                await bot.send_message(
-                    chat_id=TELEGRAM_CHAT_ID,
-                    text=f"_(y {len(pendientes)-20} más — revisá desde el dashboard)_",
-                    parse_mode="Markdown",
-                )
 
-        asyncio.run(_enviar())
-        print(f"  Telegram: {min(len(pendientes), 20)} mensajes enviados.")
+        asyncio.run(_avisar())
+        print(f"  Telegram: {len(pendientes)} gastos encolados.")
     except Exception as e:
         print(f"  (Telegram no disponible: {e})")
 

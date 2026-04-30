@@ -28,6 +28,11 @@ def init_db():
             forma_pago       TEXT
         );
 
+        CREATE TABLE IF NOT EXISTS clasificacion_queue (
+            gasto_id   INTEGER PRIMARY KEY REFERENCES gastos(id) ON DELETE CASCADE,
+            enviado_en TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS ingresos_pendientes (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             source_id   TEXT UNIQUE,
@@ -779,3 +784,41 @@ def delete_regla(regla_id: int):
     conn.execute("DELETE FROM reglas_categorias WHERE id=?", (regla_id,))
     conn.commit()
     conn.close()
+
+
+# ── Cola de clasificación por Telegram ───────────────────────────────────────
+
+def enqueue_clasificacion(gasto_id: int):
+    from datetime import datetime
+    conn = get_conn()
+    conn.execute(
+        "INSERT OR IGNORE INTO clasificacion_queue (gasto_id, enviado_en) VALUES (?, ?)",
+        (gasto_id, datetime.now().isoformat()),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_next_clasificacion() -> dict | None:
+    conn = get_conn()
+    row = conn.execute(
+        """SELECT g.* FROM clasificacion_queue q
+           JOIN gastos g ON g.id = q.gasto_id
+           ORDER BY q.enviado_en ASC LIMIT 1"""
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def dequeue_clasificacion(gasto_id: int):
+    conn = get_conn()
+    conn.execute("DELETE FROM clasificacion_queue WHERE gasto_id=?", (gasto_id,))
+    conn.commit()
+    conn.close()
+
+
+def count_clasificacion_queue() -> int:
+    conn = get_conn()
+    n = conn.execute("SELECT COUNT(*) FROM clasificacion_queue").fetchone()[0]
+    conn.close()
+    return n

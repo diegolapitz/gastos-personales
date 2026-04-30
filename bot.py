@@ -223,7 +223,11 @@ async def handle_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not solo_mi_chat(update):
         return
 
-    # Si hay un ingreso esperando respuesta en texto libre, procesarlo primero
+    # Si hay gastos en cola de clasificación, procesarlos primero
+    if await handle_clasificacion_texto(update, context):
+        return
+
+    # Si hay un ingreso esperando respuesta en texto libre, procesarlo después
     if await handle_ingreso_texto(update, context):
         return
 
@@ -468,6 +472,79 @@ Analizá la explicación y respondé SOLO con JSON válido:
     return json.loads(raw[start:end])
 
 
+async def categorizar_con_ia(texto_usuario: str, gasto: dict) -> str:
+    """Usa Claude Haiku para categorizar un gasto a partir de texto libre del usuario."""
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    categorias = db.get_categorias_gasto()
+    from importer_mp import limpiar_nombre
+    nombre = limpiar_nombre(gasto["descripcion"])
+
+    prompt = f"""El usuario está clasificando un gasto de su extracto bancario.
+
+Gasto: "{nombre}" — ${gasto['monto']:,.0f} el {gasto['fecha']}
+Explicación del usuario: "{texto_usuario}"
+
+Categorías disponibles: {', '.join(categorias)}
+
+Respondé SOLO con el nombre exacto de la categoría más apropiada (sin explicación, sin comillas)."""
+
+    msg = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=50,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    categoria = msg.content[0].text.strip().strip('"').strip("'")
+    # Verificar que sea una categoría válida
+    if categoria not in categorias:
+        categoria = "Otros"
+    return categoria
+
+
+async def handle_clasificacion_texto(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Maneja la clasificación conversacional de gastos en cola."""
+    gasto = db.get_next_clasificacion()
+    if not gasto:
+        return False
+
+    texto = update.message.text.strip()
+    msg_espera = await update.message.reply_text("Procesando...")
+
+    try:
+        categoria = await categorizar_con_ia(texto, gasto)
+    except Exception as e:
+        await msg_espera.edit_text(f"No pude interpretar eso: {e}")
+        return True
+
+    db.update_gasto(gasto["id"], categoria=categoria)
+    db.upsert_regla(gasto["descripcion"].lower().strip(), categoria, orden=50)
+    db.dequeue_clasificacion(gasto["id"])
+
+    # Ver si hay más en la cola
+    siguiente = db.get_next_clasificacion()
+    resto = db.count_clasificacion_queue()
+
+    from importer_mp import limpiar_nombre
+    nombre_actual = limpiar_nombre(gasto["descripcion"])
+
+    if siguiente:
+        nombre_sig = limpiar_nombre(siguiente["descripcion"])
+        await msg_espera.edit_text(
+            f"OK *{nombre_actual}* -> *{categoria}*\n\n"
+            f"Siguiente ({resto} restantes):\n"
+            f"*{nombre_sig}*\n"
+            f"${siguiente['monto']:,.0f} — {siguiente['fecha']}\n\n"
+            f"Que fue esto?".replace(",", "."),
+            parse_mode="Markdown",
+        )
+    else:
+        await msg_espera.edit_text(
+            f"OK *{nombre_actual}* -> *{categoria}*\n\n"
+            f"Listo, no hay mas gastos para clasificar.",
+            parse_mode="Markdown",
+        )
+    return True
+
+
 async def handle_ingreso_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """El usuario explicó en texto libre qué fue un ingreso pendiente."""
     chat_id = update.effective_chat.id
@@ -570,6 +647,7 @@ def main():
     app.add_handler(CommandHandler("resumen", cmd_resumen))
     app.add_handler(CommandHandler("deudas", cmd_deudas))
     app.add_handler(CallbackQueryHandler(handle_categoria_elegida, pattern=r"^cat:"))
+    app.add_handler(CallbackQueryHandler(handle_categoria_elegida, pattern=r"^ing:"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_mensaje))
 
     logger.info("Bot iniciado.")
