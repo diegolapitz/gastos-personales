@@ -98,6 +98,10 @@ def init_db():
     if "forma_pago" not in cols:
         c.execute("ALTER TABLE gastos ADD COLUMN forma_pago TEXT")
 
+    cols_ing = [row[1] for row in c.execute("PRAGMA table_info(ingresos_pendientes)").fetchall()]
+    if "notificado" not in cols_ing:
+        c.execute("ALTER TABLE ingresos_pendientes ADD COLUMN notificado INTEGER DEFAULT 0")
+
     # Seed categorías
     for nombre in CATEGORIAS_DEFAULT:
         excluir = 1 if nombre == CATEGORIA_INVERSION else 0
@@ -591,13 +595,26 @@ def add_ingreso_pendiente(source_id: str, fecha: str, descripcion: str, monto: f
         conn.close()
 
 
-def get_ingresos_pendientes() -> list:
+def get_ingresos_pendientes(solo_nuevos: bool = False) -> list:
     conn = get_conn()
+    extra = " AND notificado=0" if solo_nuevos else ""
     rows = conn.execute(
-        "SELECT * FROM ingresos_pendientes WHERE resuelto=0 ORDER BY fecha DESC"
+        f"SELECT * FROM ingresos_pendientes WHERE resuelto=0{extra} ORDER BY fecha DESC"
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def marcar_ingresos_notificados(ids: list[int]):
+    if not ids:
+        return
+    conn = get_conn()
+    conn.execute(
+        f"UPDATE ingresos_pendientes SET notificado=1 WHERE id IN ({','.join('?'*len(ids))})",
+        ids,
+    )
+    conn.commit()
+    conn.close()
 
 
 def resolver_ingreso(ingreso_id: int, gasto_id_referencia: int | None, categoria: str, monto_neto: float | None = None):

@@ -167,21 +167,11 @@ async def cmd_estado(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_resumen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not solo_mi_chat(update):
         return
-    mes = mes_actual()
-    por_cat = db.get_gastos_por_categoria(mes)
-    total = db.get_total_mes(mes)
-
-    if not por_cat:
-        await update.message.reply_text("No hay gastos registrados este mes.")
-        return
-
-    lineas = [f"  • {cat}: {formatear_monto(m)}" for cat, m in por_cat.items()]
-    await update.message.reply_text(
-        f"📂 *Desglose {mes}*\n"
-        + "\n".join(lineas)
-        + f"\n\n*Total:* {formatear_monto(total)}",
-        parse_mode="Markdown",
-    )
+    resumen = _resumen_periodo()
+    if resumen:
+        await update.message.reply_text(resumen, parse_mode="Markdown")
+    else:
+        await update.message.reply_text("No hay datos del período actual.")
 
 
 async def cmd_deudas(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -539,9 +529,13 @@ async def handle_clasificacion_texto(update: Update, context: ContextTypes.DEFAU
     else:
         await msg_espera.edit_text(
             f"OK *{nombre_actual}* -> *{categoria}*\n\n"
-            f"Listo, no hay mas gastos para clasificar.",
+            f"Listo, clasificacion completa.",
             parse_mode="Markdown",
         )
+        # Enviar resumen del período actual
+        resumen = _resumen_periodo()
+        if resumen:
+            await update.message.reply_text(resumen, parse_mode="Markdown")
     return True
 
 
@@ -617,6 +611,45 @@ async def handle_ingreso_callback(query, partes):
         f"  _\"me devolvieron la juntada del viernes\"_\n"
         f"  _\"devolución del asado del sábado, yo puse $360k y éramos 10\"_".replace(",", "."),
         parse_mode="Markdown",
+    )
+
+
+def _resumen_periodo() -> str | None:
+    """Genera un resumen del período actual: total, por categoría y promedio diario."""
+    from datetime import date
+    periodo = db.get_periodo_actual()
+    if not periodo:
+        return None
+
+    gastos = db.get_gastos_periodo(periodo["id"])
+    if not gastos:
+        return None
+
+    total = sum(g["monto"] for g in gastos)
+    por_cat = {}
+    for g in gastos:
+        cat = g["categoria"]
+        if cat not in ("A Clasificar", "Ahorro/Inversión"):
+            por_cat[cat] = por_cat.get(cat, 0) + g["monto"]
+
+    dias = max((date.today() - date.fromisoformat(periodo["fecha_inicio"])).days, 1)
+    promedio_diario = total / dias
+
+    top = sorted(por_cat.items(), key=lambda x: x[1], reverse=True)[:6]
+    lineas_cat = "\n".join(f"  {cat}: *{formatear_monto(m)}*" for cat, m in top)
+
+    ingreso = periodo.get("monto_ingreso") or 0
+    ahorro_txt = ""
+    if ingreso:
+        ahorro = ingreso - total
+        pct = int((1 - total / ingreso) * 100) if ingreso else 0
+        ahorro_txt = f"\nAhorro estimado: *{formatear_monto(ahorro)}* ({pct}%)"
+
+    return (
+        f"Resumen del periodo actual ({periodo['fecha_inicio']} hasta hoy)\n\n"
+        f"Total gastado: *{formatear_monto(total)}*\n"
+        f"Promedio diario: *{formatear_monto(promedio_diario)}*{ahorro_txt}\n\n"
+        f"Por categoria:\n{lineas_cat}"
     )
 
 

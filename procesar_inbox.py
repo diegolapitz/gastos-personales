@@ -222,14 +222,14 @@ def _guardar_ingresos_menores(archivos):
 
 
 def _notificar_ingresos_pendientes():
-    """Manda por Telegram los ingresos pendientes de clasificar."""
+    """Manda por Telegram solo los ingresos nuevos (no notificados aún)."""
     try:
         import asyncio
         from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
         from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
         from importer_mp import limpiar_nombre
 
-        pendientes = db.get_ingresos_pendientes()
+        pendientes = db.get_ingresos_pendientes(solo_nuevos=True)
         if not pendientes:
             return
 
@@ -237,13 +237,10 @@ def _notificar_ingresos_pendientes():
 
         async def _enviar():
             bot = Bot(token=TELEGRAM_TOKEN)
-            await bot.send_message(
-                chat_id=TELEGRAM_CHAT_ID,
-                text=f"*{len(pendientes)} ingreso(s) recibido(s)* — necesito que me expliques qué fue cada uno:",
-                parse_mode="Markdown",
-            )
             for ing in pendientes[:15]:
                 nombre = limpiar_nombre(ing["descripcion"])
+                # Escapar caracteres especiales de Markdown
+                nombre_safe = nombre.replace("_", " ").replace("*", "").replace("[", "").replace("]", "")
                 teclado = InlineKeyboardMarkup([
                     [InlineKeyboardButton("Devolucion / me devolvieron", callback_data=f"ing:devol:{ing['id']}")],
                     [InlineKeyboardButton("Prestamo que me dieron",      callback_data=f"ing:prestamo:{ing['id']}")],
@@ -251,12 +248,12 @@ def _notificar_ingresos_pendientes():
                 ])
                 await bot.send_message(
                     chat_id=TELEGRAM_CHAT_ID,
-                    text=f"*+${ing['monto']:,.0f}* el {ing['fecha']}\n_{nombre}_".replace(",", "."),
-                    parse_mode="Markdown",
+                    text=f"+${ing['monto']:,.0f} el {ing['fecha']}\n{nombre_safe}".replace(",", "."),
                     reply_markup=teclado,
                 )
 
         asyncio.run(_enviar())
+        db.marcar_ingresos_notificados([i["id"] for i in pendientes])
     except Exception as e:
         print(f"  (Telegram ingresos no disponible: {e})")
 
@@ -288,7 +285,7 @@ def _notificar_sin_clasificar():
         async def _avisar():
             bot = Bot(token=TELEGRAM_TOKEN)
             primero = pendientes[0]
-            nombre = limpiar_nombre(primero["descripcion"])
+            nombre = limpiar_nombre(primero["descripcion"]).replace("_", " ").replace("*", "")
             await bot.send_message(
                 chat_id=TELEGRAM_CHAT_ID,
                 text=(
@@ -296,7 +293,7 @@ def _notificar_sin_clasificar():
                     f"Te voy preguntando de a uno.\n\n"
                     f"Primero:\n"
                     f"*{nombre}*\n"
-                    f"${primero['monto']:,.0f} — {primero['fecha']}\n\n"
+                    f"${primero['monto']:,.0f} - {primero['fecha']}\n\n"
                     f"Que fue esto?"
                 ).replace(",", "."),
                 parse_mode="Markdown",
