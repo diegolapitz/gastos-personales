@@ -542,9 +542,13 @@ async def handle_clasificacion_texto(update: Update, context: ContextTypes.DEFAU
 async def handle_ingreso_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """El usuario explicó en texto libre qué fue un ingreso pendiente."""
     chat_id = update.effective_chat.id
+    # Primero memoria (activado por botón), después DB (activado por notificación sin botones)
     pendiente = _ingresos_pendientes.get(chat_id)
     if not pendiente:
-        return False  # No hay ingreso esperando respuesta
+        pendientes_db = db.get_ingresos_pendientes()
+        if not pendientes_db:
+            return False
+        pendiente = pendientes_db[0]
 
     texto = update.message.text.strip()
     msg_espera = await update.message.reply_text("Procesando...")
@@ -568,11 +572,27 @@ async def handle_ingreso_texto(update: Update, context: ContextTypes.DEFAULT_TYP
     if resultado.get("monto_neto_gasto"):
         neto_txt = f"\nGasto neto ajustado a *${resultado['monto_neto_gasto']:,.0f}*".replace(",", ".")
 
-    await msg_espera.edit_text(
-        f"✅ Entendido: _{resumen}_{neto_txt}\n"
-        f"Categoría: *{resultado.get('categoria', 'Otros')}*",
-        parse_mode="Markdown",
-    )
+    # Ver si hay más ingresos pendientes
+    siguientes = db.get_ingresos_pendientes()
+    siguiente = next((i for i in siguientes if i["id"] != pendiente["id"]), None)
+
+    if siguiente:
+        from importer_mp import limpiar_nombre as _ln
+        nombre_sig = _ln(siguiente["descripcion"]).replace("_", " ").replace("*", "")
+        resto = len(siguientes) - 1
+        await msg_espera.edit_text(
+            f"OK: _{resumen}_{neto_txt}\n\n"
+            f"Siguiente ({resto} restantes):\n"
+            f"*+${siguiente['monto']:,.0f}* el {siguiente['fecha']}\n"
+            f"{nombre_sig}\n\n"
+            f"Que fue esto?".replace(",", "."),
+            parse_mode="Markdown",
+        )
+    else:
+        await msg_espera.edit_text(
+            f"OK: _{resumen}_{neto_txt}\n\nListo, no hay mas ingresos pendientes.",
+            parse_mode="Markdown",
+        )
     return True
 
 

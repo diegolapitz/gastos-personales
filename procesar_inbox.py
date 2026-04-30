@@ -237,20 +237,19 @@ def _notificar_ingresos_pendientes():
 
         async def _enviar():
             bot = Bot(token=TELEGRAM_TOKEN)
-            for ing in pendientes[:15]:
-                nombre = limpiar_nombre(ing["descripcion"])
-                # Escapar caracteres especiales de Markdown
-                nombre_safe = nombre.replace("_", " ").replace("*", "").replace("[", "").replace("]", "")
-                teclado = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("Devolucion / me devolvieron", callback_data=f"ing:devol:{ing['id']}")],
-                    [InlineKeyboardButton("Prestamo que me dieron",      callback_data=f"ing:prestamo:{ing['id']}")],
-                    [InlineKeyboardButton("Ignorar",                     callback_data=f"ing:ignorar:{ing['id']}")],
-                ])
-                await bot.send_message(
-                    chat_id=TELEGRAM_CHAT_ID,
-                    text=f"+${ing['monto']:,.0f} el {ing['fecha']}\n{nombre_safe}".replace(",", "."),
-                    reply_markup=teclado,
-                )
+            primero = pendientes[0]
+            nombre = limpiar_nombre(primero["descripcion"]).replace("_", " ").replace("*", "")
+            await bot.send_message(
+                chat_id=TELEGRAM_CHAT_ID,
+                text=(
+                    f"*{len(pendientes)} ingreso(s) recibido(s) para explicar.*\n\n"
+                    f"Primero:\n"
+                    f"*+${primero['monto']:,.0f}* el {primero['fecha']}\n"
+                    f"{nombre}\n\n"
+                    f"Que fue esto?"
+                ).replace(",", "."),
+                parse_mode="Markdown",
+            )
 
         asyncio.run(_enviar())
         db.marcar_ingresos_notificados([i["id"] for i in pendientes])
