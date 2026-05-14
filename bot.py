@@ -507,6 +507,7 @@ Explicación del usuario: "{texto_usuario}"
 
 Categorías disponibles: {', '.join(categorias)}
 
+Si el usuario dice que no recuerda, no sabe, no se acuerda, no tiene idea, o algo similar, respondé exactamente: A Revisar
 Respondé SOLO con el nombre exacto de la categoría más apropiada (sin explicación, sin comillas)."""
 
     msg = client.messages.create(
@@ -515,9 +516,8 @@ Respondé SOLO con el nombre exacto de la categoría más apropiada (sin explica
         messages=[{"role": "user", "content": prompt}],
     )
     categoria = msg.content[0].text.strip().strip('"').strip("'")
-    # Verificar que sea una categoría válida
     if categoria not in categorias:
-        categoria = "Otros"
+        categoria = "A Revisar"
     return categoria
 
 

@@ -21,10 +21,15 @@ def listar_gastos(
     forma_pago: Optional[str] = None,
     buscar: Optional[str] = None,
     mes: Optional[str] = None,
+    mes_consumo: Optional[str] = None,
     monto_min: Optional[float] = None,
     monto_max: Optional[float] = None,
 ):
-    if periodo_id:
+    if mes_consumo:
+        gastos = db.get_gastos_por_consumo(mes_consumo)
+    elif periodo_id == 0:
+        gastos = db.get_todos_gastos()
+    elif periodo_id:
         gastos = db.get_gastos_periodo(periodo_id)
     elif mes:
         gastos = db.get_gastos_mes(mes)

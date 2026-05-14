@@ -6,6 +6,7 @@ from config import DB_PATH, CATEGORIAS_DEFAULT, FORMAS_PAGO_DEFAULT, CATEGORIA_I
 def get_conn():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
     return conn
 
 
@@ -498,10 +499,32 @@ def add_gasto(fecha, descripcion, monto, categoria, fuente="telegram",
         conn.close()
 
 
+def get_todos_gastos() -> list:
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT * FROM gastos ORDER BY fecha DESC, id DESC"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
 def get_gastos_mes(mes: str):
     conn = get_conn()
     rows = conn.execute(
         "SELECT * FROM gastos WHERE fecha LIKE ? ORDER BY fecha DESC",
+        (f"{mes}%",),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_gastos_por_consumo(mes: str) -> list:
+    """Gastos cuya fecha_consumo (o fecha si no tiene) cae en el mes dado (YYYY-MM)."""
+    conn = get_conn()
+    rows = conn.execute(
+        """SELECT * FROM gastos
+           WHERE COALESCE(fecha_consumo, fecha) LIKE ?
+           ORDER BY COALESCE(fecha_consumo, fecha) DESC""",
         (f"{mes}%",),
     ).fetchall()
     conn.close()

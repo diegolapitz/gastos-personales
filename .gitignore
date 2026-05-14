@@ -8,10 +8,16 @@ venv/
 
 # DB y datos sensibles
 gastos.db
+gastos_*.db
 config.py
 .env
 *.csv
-inbox/.processed.json
+*.pdf
+inbox/
+categorizer_cache.json
+
+# Temp / OS
+.fuse_hidden*
 
 # Node
 frontend/node_modules/

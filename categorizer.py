@@ -30,7 +30,8 @@ def categorizar_por_reglas(descripcion: str) -> str | None:
 def categorizar_con_ia(descripcion: str) -> tuple[str, str]:
     """Llama a Claude Haiku. Retorna (categoria, razon)."""
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-    categorias = [c for c in db.get_categorias() if c not in ("A Clasificar",)]
+    _excluir = {"A Clasificar", "A Revisar"}
+    categorias = [c for c in db.get_categorias() if c not in _excluir]
 
     prompt = (
         f'Eres un asistente de finanzas personales. '
@@ -55,7 +56,7 @@ def categorizar_con_ia(descripcion: str) -> tuple[str, str]:
 
     categorias_validas = db.get_categorias()
     categoria = data.get("categoria", "A Clasificar")
-    if categoria not in categorias_validas or categoria == "Otros":
+    if categoria not in categorias_validas or categoria in ("Otros", "A Revisar", "A Clasificar"):
         categoria = "A Clasificar"
     razon = data.get("razon", "")
     return categoria, razon

@@ -44,6 +44,7 @@ export const api = {
   // Categorías y reglas
   getCategorias: () => req('/categorias'),
   addCategoria: (data) => req('/categorias', { method: 'POST', body: JSON.stringify(data) }),
+  updateCategoria: (nombre, data) => req(`/categorias/${encodeURIComponent(nombre)}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteCategoria: (nombre) => req(`/categorias/${encodeURIComponent(nombre)}`, { method: 'DELETE' }),
   addFormaPago: (data) => req('/categorias/formas_pago', { method: 'POST', body: JSON.stringify(data) }),
   deleteFormaPago: (nombre) => req(`/categorias/formas_pago/${encodeURIComponent(nombre)}`, { method: 'DELETE' }),
@@ -54,13 +55,24 @@ export const api = {
   // Config
   getConfig: () => req('/config'),
   setConfig: (data) => req('/config', { method: 'PUT', body: JSON.stringify(data) }),
+  getVista: () => req('/config').then(c => c.vista_gastos || 'liquidez'),
+  setVista: (v) => req('/config', { method: 'PUT', body: JSON.stringify({ vista_gastos: v }) }),
+
+  // Ingresos pendientes
+  getIngresos: () => req('/ingresos'),
+  resolverIngreso: (id) => req(`/ingresos/${id}/resolver`, { method: 'POST' }),
+  ingresoAlPeriodo: (id) => req(`/ingresos/${id}/al-periodo`, { method: 'POST' }),
 
   // Análisis
   getTendencia: () => req('/analisis/tendencia'),
   getCategoriaTendencia: (cat) => req(`/analisis/categoria?categoria=${encodeURIComponent(cat)}`),
-  getHormigas: () => req('/analisis/hormigas'),
+  getHormigas: (periodoId = null) => req('/analisis/hormigas' + (periodoId != null ? `?periodo_id=${periodoId}` : '')),
   getRecurrentes: () => req('/analisis/recurrentes'),
   getHeatmap: () => req('/analisis/heatmap'),
+  getConsumo: (meses = 12) => req(`/analisis/consumo?meses=${meses}`),
+  getResumenAnalisis: () => req('/analisis/resumen'),
+  getRankingAnalisis: (periodoId = null) => req('/analisis/ranking' + (periodoId != null ? `?periodo_id=${periodoId}` : '')),
+  getAcumuladoAnalisis: (periodoId = null) => req('/analisis/acumulado' + (periodoId != null ? `?periodo_id=${periodoId}` : '')),
 }
 
 export function fmt(n) {
@@ -75,24 +87,64 @@ export function fmtFecha(f) {
 }
 
 export const CAT_COLORS = {
-  'Alimentación': '#4CAF50',
-  'Restaurantes': '#FF9800',
-  'Suscripciones': '#9C27B0',
-  'Servicios': '#2196F3',
-  'Vivienda': '#795548',
-  'Compras': '#F44336',
-  'Transporte': '#00BCD4',
-  'Deporte': '#8BC34A',
-  'Entretenimiento': '#E91E63',
-  'Salud': '#009688',
-  'Ropa': '#FF5722',
-  'Delivery': '#FFC107',
-  'Otros': '#9E9E9E',
-  'Electrónica': '#3F51B5',
-  'Ahorro/Inversión': '#1D9E75',
-  'A Clasificar': '#BDBDBD',
+  // Finanzas
+  'Tarjetas':          '#1e3f7a',
+  'Inversiones':       '#14532d',
+  'Ahorro/Inversión':  '#14532d',
+
+  // Comida & mercado
+  'Supermercado':      '#15803d',
+  'Alimentación':      '#b45309',
+  'Comida':            '#c2410c',
+  'Restaurantes':      '#b91c1c',
+  'Delivery':          '#9a6700',
+
+  // Casa
+  'Vivienda':          '#7c2d12',
+  'Servicios':         '#1e40af',
+  'Mantenimiento':     '#44403c',
+  'Decoración':        '#581c87',
+
+  // Salidas & social
+  'Vacaciones':        '#075985',
+  'Juntadas/salidas':  '#92400e',
+  'Entretenimiento':   '#6b21a8',
+  'Regalos':           '#9d174d',
+
+  // Deporte & hobbies
+  'Deporte':           '#3f6212',
+  'Hobbies':           '#065f46',
+  'Mascota':           '#78350f',
+
+  // Personal & compras
+  'Compras':           '#831843',
+  'Ropa':              '#be185d',
+  'Salud':             '#0e7490',
+  'Electrónica':       '#1e3a8a',
+
+  // Servicios digitales
+  'Suscripciones':     '#5b21b6',
+  'Subscripciones':    '#5b21b6',
+
+  // Transporte
+  'Transporte':        '#0f766e',
+  'Transporte/Viajes': '#134e4a',
+
+  // Casa / compras del hogar
+  'Hogar':             '#92400e',
+
+  // Educación
+  'Educación':         '#1e40af',
+
+  // Catch-all
+  'Otros':             '#6b7280',
+
+  // Sin clasificar → siempre gris
+  'A Clasificar':      '#9ca3af',
+  'A Revisar':         '#9ca3af',
+  'Sin Clasificar':    '#9ca3af',
 }
 
 export function catColor(cat) {
-  return CAT_COLORS[cat] || '#9E9E9E'
+  return CAT_COLORS[cat] || '#6b7280'
 }

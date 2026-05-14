@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import database as db
 
-from backend.routes import gastos, periodos, presupuestos, importar, categorias, config, analisis
+from backend.routes import gastos, periodos, presupuestos, importar, categorias, config, analisis, ingresos
 
 app = FastAPI(title="Gastos API")
 
@@ -25,6 +25,7 @@ app.include_router(importar.router,     prefix="/api/importar",     tags=["impor
 app.include_router(categorias.router,   prefix="/api/categorias",   tags=["categorias"])
 app.include_router(config.router,       prefix="/api/config",       tags=["config"])
 app.include_router(analisis.router,     prefix="/api/analisis",     tags=["analisis"])
+app.include_router(ingresos.router,     prefix="/api/ingresos",     tags=["ingresos"])
 
 @app.get("/api/health")
 def health():

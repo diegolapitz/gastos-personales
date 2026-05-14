@@ -1,14 +1,34 @@
 import { useEffect, useState } from 'react'
 import { api, fmt, catColor, fmtFecha } from '../api'
-import { Plus, Trash2, RefreshCw, Save, Pencil, Check, X } from 'lucide-react'
+import { Plus, Trash2, RefreshCw, Save } from 'lucide-react'
 
 function Section({ title, children }) {
   return (
-    <div className="card" style={{ marginBottom: 20 }}>
-      <div className="section-title">{title}</div>
+    <div className="card" style={{ marginBottom: 14 }}>
+      <div className="section-label">{title}</div>
       {children}
     </div>
   )
+}
+
+function Modal({ title, message, onConfirm, onCancel }) {
+  return (
+    <div className="modal-overlay">
+      <div className="modal">
+        <h3>{title}</h3>
+        <p>{message}</p>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <button className="btn btn-ghost" onClick={onCancel}>Cancelar</button>
+          <button className="btn btn-danger" onClick={onConfirm}>Confirmar</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function Ok({ show }) {
+  if (!show) return null
+  return <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--green)', letterSpacing: '0.1em' }}>✓ GUARDADO</span>
 }
 
 export default function Configuracion() {
@@ -20,63 +40,52 @@ export default function Configuracion() {
   const [periodos, setPeriodos] = useState([])
   const [loading, setLoading] = useState(true)
 
-  // Períodos
-  const [periodoEdits, setPeriodoEdits] = useState({})   // id -> {fecha_inicio, fecha_fin, monto_ingreso}
+  const [periodoEdits, setPeriodoEdits] = useState({})
   const [periodoEditando, setPeriodoEditando] = useState(null)
   const [newPeriodoFecha, setNewPeriodoFecha] = useState('')
   const [newPeriodoMonto, setNewPeriodoMonto] = useState('')
-  const [periodoSaving, setPeriodoSaving] = useState(false)
 
-  // Config local edits
   const [umbral, setUmbral] = useState('')
   const [objAhorro, setObjAhorro] = useState('')
   const [savingConfig, setSavingConfig] = useState(false)
   const [configOk, setConfigOk] = useState(false)
 
-  // Presupuesto edits
   const [presupEdits, setPresupEdits] = useState({})
   const [savingPresup, setSavingPresup] = useState(false)
   const [presupOk, setPresupOk] = useState(false)
 
-  // Nueva categoría
   const [newCat, setNewCat] = useState('')
   const [newCatExcluir, setNewCatExcluir] = useState(false)
-
-  // Nueva forma de pago
+  const [catEditando, setCatEditando] = useState(null) // nombre original
+  const [catEditNombre, setCatEditNombre] = useState('')
   const [newFp, setNewFp] = useState('')
-
-  // Nueva regla
   const [newReglaKeyword, setNewReglaKeyword] = useState('')
   const [newReglaCat, setNewReglaCat] = useState('')
-  const [newReglaOrden, setNewReglaOrden] = useState('')
+  const [newReglaOrden, setNewReglaOrden] = useState('50')
 
-  // Recategorizar
   const [recatLoading, setRecatLoading] = useState(false)
   const [recatResult, setRecatResult] = useState(null)
+  const [showRecatModal, setShowRecatModal] = useState(false)
 
-  useEffect(() => {
-    load()
-  }, [])
+  useEffect(() => { load() }, [])
 
   async function load() {
     setLoading(true)
     const [cfg, cats, pres, pers] = await Promise.all([
-      api.getConfig(),
-      api.getCategorias(),
-      api.getPresupuesto(),
-      api.getPeriodos(),
+      api.getConfig(), api.getCategorias(), api.getPresupuesto(), api.getPeriodos(),
     ])
     setConfig(cfg)
     setUmbral(cfg.umbral_sueldo || '')
     setObjAhorro(cfg.objetivo_ahorro_pct || '')
-    setCategorias(cats.categorias_completo || cats.categorias || [])
+    const catsFull = cats.categorias_completo || cats.categorias || []
+    setCategorias(catsFull)
     setFormasPago(cats.formas_pago || [])
     setReglas(cats.reglas || [])
     setPresupuestos(pres)
     const edits = {}
     Object.entries(pres).forEach(([c, v]) => { edits[c] = v })
     setPresupEdits(edits)
-    const nombres = (cats.categorias_completo || []).map(c => c.nombre).filter(Boolean)
+    const nombres = catsFull.map(c => c.nombre || c).filter(Boolean)
     if (nombres.length > 0) setNewReglaCat(nombres[0])
     setPeriodos(pers.sort((a, b) => a.fecha_inicio < b.fecha_inicio ? -1 : 1))
     setLoading(false)
@@ -84,13 +93,10 @@ export default function Configuracion() {
 
   async function saveConfig() {
     setSavingConfig(true)
-    await api.setConfig({
-      umbral_sueldo: Number(umbral),
-      objetivo_ahorro_pct: Number(objAhorro),
-    })
+    await api.setConfig({ umbral_sueldo: Number(umbral), objetivo_ahorro_pct: Number(objAhorro) })
     setSavingConfig(false)
     setConfigOk(true)
-    setTimeout(() => setConfigOk(false), 2000)
+    setTimeout(() => setConfigOk(false), 2500)
   }
 
   async function savePresupuestos() {
@@ -100,7 +106,7 @@ export default function Configuracion() {
     await api.setTodosPresupuestos(data)
     setSavingPresup(false)
     setPresupOk(true)
-    setTimeout(() => setPresupOk(false), 2000)
+    setTimeout(() => setPresupOk(false), 2500)
     load()
   }
 
@@ -113,8 +119,28 @@ export default function Configuracion() {
   }
 
   async function deleteCategoria(nombre) {
-    if (!confirm(`¿Eliminar categoría "${nombre}"?`)) return
+    if (!confirm(`¿Eliminar "${nombre}"?`)) return
     await api.deleteCategoria(nombre)
+    load()
+  }
+
+  function startEditCat(nombre) {
+    setCatEditando(nombre)
+    setCatEditNombre(nombre)
+  }
+
+  async function saveEditCat(nombreOriginal) {
+    const nuevo = catEditNombre.trim()
+    if (!nuevo) return
+    if (nuevo !== nombreOriginal) {
+      await api.updateCategoria(nombreOriginal, { nuevo_nombre: nuevo })
+    }
+    setCatEditando(null)
+    load()
+  }
+
+  async function toggleExcluir(nombre, excluir) {
+    await api.updateCategoria(nombre, { excluir_gastos: !excluir })
     load()
   }
 
@@ -125,25 +151,11 @@ export default function Configuracion() {
     load()
   }
 
-  async function deleteFormaPago(nombre) {
-    await api.deleteFormaPago(nombre)
-    load()
-  }
-
   async function addRegla() {
     if (!newReglaKeyword.trim() || !newReglaCat) return
-    await api.addRegla({
-      keyword: newReglaKeyword.trim().toLowerCase(),
-      categoria: newReglaCat,
-      orden: Number(newReglaOrden) || 100,
-    })
+    await api.addRegla({ keyword: newReglaKeyword.trim().toLowerCase(), categoria: newReglaCat, orden: Number(newReglaOrden) || 50 })
     setNewReglaKeyword('')
-    setNewReglaOrden('')
-    load()
-  }
-
-  async function deleteRegla(id) {
-    await api.deleteRegla(id)
+    setNewReglaOrden('50')
     load()
   }
 
@@ -151,39 +163,20 @@ export default function Configuracion() {
     setPeriodoEditando(p.id)
     setPeriodoEdits(prev => ({
       ...prev,
-      [p.id]: {
-        fecha_inicio: p.fecha_inicio,
-        fecha_fin: p.fecha_fin || '',
-        monto_ingreso: p.monto_ingreso,
-      }
+      [p.id]: { fecha_inicio: p.fecha_inicio, fecha_fin: p.fecha_fin || '', monto_ingreso: p.monto_ingreso }
     }))
   }
 
   async function savePeriodo(id) {
-    setPeriodoSaving(true)
     const e = periodoEdits[id]
-    await api.updatePeriodo(id, {
-      fecha_inicio: e.fecha_inicio,
-      fecha_fin: e.fecha_fin || null,
-      monto_ingreso: Number(e.monto_ingreso) || 0,
-    })
+    await api.updatePeriodo(id, { fecha_inicio: e.fecha_inicio, fecha_fin: e.fecha_fin || null, monto_ingreso: Number(e.monto_ingreso) || 0 })
     setPeriodoEditando(null)
-    setPeriodoSaving(false)
-    load()
-  }
-
-  async function deletePeriodo(id) {
-    if (!confirm('¿Eliminar este período? No se borran los gastos.')) return
-    await api.deletePeriodo(id)
     load()
   }
 
   async function addPeriodo() {
     if (!newPeriodoFecha) return
-    await api.crearPeriodo({
-      fecha_inicio: newPeriodoFecha,
-      monto_ingreso: Number(newPeriodoMonto) || 0,
-    })
+    await api.crearPeriodo({ fecha_inicio: newPeriodoFecha, monto_ingreso: Number(newPeriodoMonto) || 0 })
     setNewPeriodoFecha('')
     setNewPeriodoMonto('')
     load()
@@ -195,151 +188,129 @@ export default function Configuracion() {
     const r = await api.recategorizar()
     setRecatLoading(false)
     setRecatResult(r)
+    setShowRecatModal(false)
+    load()
   }
 
-  if (loading) return <div className="loading">Cargando configuración...</div>
+  if (loading) return <div className="loading">CARGANDO</div>
+
+  const catNombres = categorias.map(c => c.nombre || c)
+
+  const inp = (val, onChange, props = {}) => (
+    <input value={val} onChange={e => onChange(e.target.value)} {...props} />
+  )
 
   return (
     <div>
       <div className="page-header"><h1>Configuración</h1></div>
 
-      {/* Config general */}
+      {showRecatModal && (
+        <Modal
+          title="RECATEGORIZAR GASTOS"
+          message="Esto va a re-aplicar todas las reglas keyword a los gastos que no fueron editados manualmente. Los gastos con override manual no se tocan."
+          onConfirm={recategorizar}
+          onCancel={() => setShowRecatModal(false)}
+        />
+      )}
+
+      {/* General */}
       <Section title="General">
-        <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
-          <div className="form-group">
+        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <div className="form-group" style={{ flex: '1 1 200px' }}>
             <label className="form-label">Umbral detección sueldo ($)</label>
-            <input
-              type="number"
-              value={umbral}
-              onChange={e => setUmbral(e.target.value)}
-              placeholder="3000000"
-            />
-            <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 3 }}>
-              Monto mínimo para detectar un ingreso como sueldo
-            </div>
+            {inp(umbral, setUmbral, { type: 'number', placeholder: '3000000' })}
           </div>
-          <div className="form-group">
+          <div className="form-group" style={{ flex: '1 1 140px' }}>
             <label className="form-label">Objetivo ahorro (%)</label>
-            <input
-              type="number"
-              value={objAhorro}
-              onChange={e => setObjAhorro(e.target.value)}
-              placeholder="30"
-              min={0} max={100}
-            />
-            <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 3 }}>
-              % del sueldo a destinar como objetivo de ahorro
-            </div>
+            {inp(objAhorro, setObjAhorro, { type: 'number', placeholder: '50', min: 0, max: 100 })}
           </div>
-        </div>
-        <div style={{ marginTop: 16, display: 'flex', gap: 10, alignItems: 'center' }}>
-          <button className="btn btn-primary" onClick={saveConfig} disabled={savingConfig}>
-            <Save size={13} />
-            {savingConfig ? 'Guardando...' : 'Guardar'}
-          </button>
-          {configOk && <span style={{ color: 'var(--success)', fontSize: 13 }}>✓ Guardado</span>}
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', paddingBottom: 1 }}>
+            <button className="btn btn-primary btn-sm" onClick={saveConfig} disabled={savingConfig}>
+              <Save size={11} /> {savingConfig ? 'Guardando...' : 'Guardar'}
+            </button>
+            <Ok show={configOk} />
+          </div>
         </div>
       </Section>
 
       {/* Presupuestos */}
       <Section title="Presupuestos por categoría">
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 10, marginBottom: 16 }}>
           {categorias
-            .filter(c => typeof c === 'object' ? !c.excluir_gastos : !['Ahorro/Inversión', 'A Clasificar'].includes(c))
+            .filter(c => !(c.excluir_gastos) && !['A Clasificar', 'A Revisar'].includes(c.nombre || c))
             .map(c => {
-              const nombre = typeof c === 'object' ? c.nombre : c
+              const nombre = c.nombre || c
               return (
                 <div key={nombre} className="form-group">
-                  <label className="form-label" style={{ color: catColor(nombre) }}>{nombre}</label>
+                  <label className="form-label" style={{ color: catColor(nombre) + 'cc' }}>{nombre}</label>
                   <input
                     type="number"
                     value={presupEdits[nombre] ?? 0}
                     onChange={e => setPresupEdits(p => ({ ...p, [nombre]: e.target.value }))}
-                    style={{ borderColor: catColor(nombre) + '55' }}
+                    style={{ fontFamily: 'var(--mono)', borderColor: catColor(nombre) + '33' }}
                   />
                 </div>
               )
             })}
         </div>
-        <div style={{ marginTop: 16, display: 'flex', gap: 10, alignItems: 'center' }}>
-          <button className="btn btn-primary" onClick={savePresupuestos} disabled={savingPresup}>
-            <Save size={13} />
-            {savingPresup ? 'Guardando...' : 'Guardar presupuestos'}
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <button className="btn btn-primary btn-sm" onClick={savePresupuestos} disabled={savingPresup}>
+            <Save size={11} /> {savingPresup ? 'Guardando...' : 'Guardar presupuestos'}
           </button>
-          {presupOk && <span style={{ color: 'var(--success)', fontSize: 13 }}>✓ Guardado</span>}
+          <Ok show={presupOk} />
         </div>
       </Section>
 
       {/* Períodos */}
       <Section title="Períodos de cobro">
-        <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 12 }}>
-          Cada período empieza cuando cobrás el sueldo. Los gastos se asignan automáticamente según la fecha.
-        </div>
-        <div className="table-wrap" style={{ marginBottom: 16 }}>
+        <div className="table-wrap" style={{ marginBottom: 14 }}>
           <table>
             <thead>
               <tr>
-                <th>Inicio</th>
-                <th>Fin</th>
-                <th>Cobro</th>
-                <th>Gastos</th>
-                <th style={{ width: 80 }}></th>
+                <th>Inicio</th><th>Fin</th><th style={{ textAlign: 'right' }}>Ingreso</th>
+                <th style={{ textAlign: 'right' }}>Gastos</th><th style={{ width: 120 }}></th>
               </tr>
             </thead>
             <tbody>
               {periodos.map(p => {
                 const editing = periodoEditando === p.id
                 const e = periodoEdits[p.id] || {}
+                const isActual = p.es_actual || !p.fecha_fin
                 return (
-                  <tr key={p.id} style={p.es_actual ? { background: 'var(--accent-soft, #EEF6FF)' } : {}}>
-                    <td>
+                  <tr key={p.id} style={isActual ? { background: '#0d1520' } : {}}>
+                    <td className="mono">
                       {editing
-                        ? <input type="date" value={e.fecha_inicio} style={{ width: 130 }}
+                        ? <input type="date" value={e.fecha_inicio} style={{ width: 130, fontFamily: 'var(--mono)', fontSize: 11 }}
                             onChange={ev => setPeriodoEdits(d => ({ ...d, [p.id]: { ...d[p.id], fecha_inicio: ev.target.value } }))} />
-                        : <span style={{ fontWeight: p.es_actual ? 600 : 400 }}>{fmtFecha(p.fecha_inicio)}</span>
+                        : <span style={{ color: isActual ? 'var(--blue)' : 'var(--text)' }}>{fmtFecha(p.fecha_inicio)}{isActual ? ' ←' : ''}</span>
                       }
                     </td>
-                    <td>
+                    <td className="mono" style={{ color: 'var(--text-2)' }}>
                       {editing
-                        ? <input type="date" value={e.fecha_fin} style={{ width: 130 }}
+                        ? <input type="date" value={e.fecha_fin || ''} style={{ width: 130, fontFamily: 'var(--mono)', fontSize: 11 }}
                             onChange={ev => setPeriodoEdits(d => ({ ...d, [p.id]: { ...d[p.id], fecha_fin: ev.target.value } }))} />
-                        : p.fecha_fin ? fmtFecha(p.fecha_fin) : <span style={{ color: 'var(--success)', fontSize: 12 }}>actual</span>
+                        : (p.fecha_fin ? fmtFecha(p.fecha_fin) : 'HOY')
                       }
                     </td>
-                    <td>
+                    <td className="amount">
                       {editing
-                        ? <input type="number" value={e.monto_ingreso} style={{ width: 120 }}
+                        ? <input type="number" value={e.monto_ingreso || ''} style={{ width: 120, fontFamily: 'var(--mono)', fontSize: 11, textAlign: 'right' }}
                             onChange={ev => setPeriodoEdits(d => ({ ...d, [p.id]: { ...d[p.id], monto_ingreso: ev.target.value } }))} />
-                        : fmt(p.monto_ingreso)
+                        : fmt(p.monto_ingreso || 0)
                       }
                     </td>
-                    <td style={{ color: 'var(--text-secondary)', fontSize: 12 }}>
-                      {fmt(p.total_gastos)}
-                    </td>
+                    <td className="amount" style={{ color: 'var(--text-2)' }}>{fmt(p.total_gastos || 0)}</td>
                     <td>
-                      {editing ? (
-                        <div style={{ display: 'flex', gap: 4 }}>
-                          <button className="btn btn-primary btn-sm" style={{ padding: '4px 8px' }}
-                            onClick={() => savePeriodo(p.id)} disabled={periodoSaving}>
-                            <Check size={12} />
-                          </button>
-                          <button className="btn btn-secondary btn-sm" style={{ padding: '4px 8px' }}
-                            onClick={() => setPeriodoEditando(null)}>
-                            <X size={12} />
-                          </button>
-                        </div>
-                      ) : (
-                        <div style={{ display: 'flex', gap: 4 }}>
-                          <button className="btn btn-secondary btn-sm" style={{ padding: '4px 8px' }}
-                            onClick={() => startEditPeriodo(p)}>
-                            <Pencil size={12} />
-                          </button>
-                          <button className="btn btn-secondary btn-sm" style={{ padding: '4px 8px', opacity: 0.4 }}
-                            onClick={() => deletePeriodo(p.id)}>
-                            <Trash2 size={12} />
-                          </button>
-                        </div>
-                      )}
+                      <div style={{ display: 'flex', gap: 5, justifyContent: 'flex-end' }}>
+                        {editing ? (
+                          <>
+                            <button className="btn btn-primary btn-sm" onClick={() => savePeriodo(p.id)}>✓</button>
+                            <button className="btn btn-ghost btn-sm" onClick={() => setPeriodoEditando(null)}>✕</button>
+                          </>
+                        ) : (
+                          <button className="btn btn-ghost btn-sm" onClick={() => startEditPeriodo(p)}>Editar</button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 )
@@ -347,154 +318,143 @@ export default function Configuracion() {
             </tbody>
           </table>
         </div>
-
-        <div className="form-row" style={{ flexWrap: 'wrap', gap: 10 }}>
-          <div className="form-group" style={{ flex: '0 0 160px' }}>
-            <label className="form-label">Inicio del período</label>
-            <input type="date" value={newPeriodoFecha} onChange={e => setNewPeriodoFecha(e.target.value)} />
-          </div>
-          <div className="form-group" style={{ flex: '0 0 160px' }}>
-            <label className="form-label">Monto cobrado ($)</label>
-            <input type="number" placeholder="0" value={newPeriodoMonto} onChange={e => setNewPeriodoMonto(e.target.value)} />
-          </div>
-          <button className="btn btn-primary" style={{ alignSelf: 'flex-end' }} onClick={addPeriodo}>
-            <Plus size={13} /> Agregar período
-          </button>
-        </div>
-      </Section>
-
-      {/* Categorías */}
-      <Section title="Categorías">
-        <div className="table-wrap" style={{ marginBottom: 16 }}>
-          <table>
-            <thead>
-              <tr>
-                <th>Nombre</th>
-                <th>Excluir de gastos</th>
-                <th style={{ width: 60 }}></th>
-              </tr>
-            </thead>
-            <tbody>
-              {(Array.isArray(categorias) ? categorias : []).map(c => {
-                const nombre = typeof c === 'object' ? c.nombre : c
-                const excluir = typeof c === 'object' ? c.excluir_gastos : false
-                return (
-                  <tr key={nombre}>
-                    <td>
-                      <span
-                        className="badge"
-                        style={{ background: catColor(nombre) + '22', color: catColor(nombre) }}
-                      >{nombre}</span>
-                    </td>
-                    <td style={{ fontSize: 12, color: excluir ? 'var(--success)' : 'var(--text-secondary)' }}>
-                      {excluir ? 'Sí' : 'No'}
-                    </td>
-                    <td>
-                      <button
-                        className="btn btn-secondary btn-sm"
-                        style={{ padding: '4px 8px', opacity: 0.5 }}
-                        onClick={() => deleteCategoria(nombre)}
-                      >
-                        <Trash2 size={12} />
-                      </button>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="form-row" style={{ flexWrap: 'wrap', gap: 10 }}>
-          <div className="form-group" style={{ flex: '1 1 160px' }}>
-            <label className="form-label">Nueva categoría</label>
-            <input
-              placeholder="Nombre..."
-              value={newCat}
-              onChange={e => setNewCat(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && addCategoria()}
-            />
+        <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
+          <div className="form-group" style={{ flex: '0 0 auto' }}>
+            <label className="form-label">Fecha inicio</label>
+            <input type="date" value={newPeriodoFecha} onChange={e => setNewPeriodoFecha(e.target.value)} style={{ width: 140 }} />
           </div>
           <div className="form-group" style={{ flex: '0 0 auto' }}>
-            <label className="form-label">Excluir de gastos</label>
-            <div style={{ display: 'flex', alignItems: 'center', height: 36, gap: 6 }}>
-              <input
-                type="checkbox"
-                checked={newCatExcluir}
-                onChange={e => setNewCatExcluir(e.target.checked)}
-                style={{ width: 'auto' }}
-              />
-              <span style={{ fontSize: 12 }}>Sí</span>
-            </div>
+            <label className="form-label">Ingreso ($)</label>
+            <input type="number" value={newPeriodoMonto} onChange={e => setNewPeriodoMonto(e.target.value)} placeholder="0" style={{ width: 130 }} />
           </div>
-          <button className="btn btn-primary" style={{ alignSelf: 'flex-end' }} onClick={addCategoria}>
-            <Plus size={13} /> Agregar
+          <button className="btn btn-ghost btn-sm" onClick={addPeriodo} style={{ marginBottom: 1 }}>
+            <Plus size={11} /> Agregar período
           </button>
         </div>
       </Section>
 
-      {/* Formas de pago */}
-      <Section title="Formas de pago">
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
-          {formasPago.map(fp => (
-            <div key={fp} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <span className="badge">{fp}</span>
-              <button
-                className="btn btn-secondary btn-sm"
-                style={{ padding: '2px 6px', opacity: 0.5 }}
-                onClick={() => deleteFormaPago(fp)}
-              >
-                <Trash2 size={10} />
-              </button>
-            </div>
-          ))}
-        </div>
-        <div className="form-row">
-          <div className="form-group">
-            <label className="form-label">Nueva forma de pago</label>
-            <input
-              placeholder="Ej: Efectivo, Tarjeta de débito..."
-              value={newFp}
-              onChange={e => setNewFp(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && addFormaPago()}
-            />
+      {/* Categorías + Formas de pago */}
+      <div className="two-col" style={{ marginBottom: 14 }}>
+        <Section title="Categorías">
+          <div style={{ marginBottom: 12 }}>
+            {categorias.map(c => {
+              const nombre = c.nombre || c
+              const excluir = c.excluir_gastos || false
+              const editando = catEditando === nombre
+              return (
+                <div key={nombre} style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  padding: '6px 0', borderBottom: '1px solid var(--border)',
+                  gap: 8,
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: catColor(nombre), flexShrink: 0 }} />
+                    {editando ? (
+                      <input
+                        autoFocus
+                        value={catEditNombre}
+                        onChange={e => setCatEditNombre(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') saveEditCat(nombre)
+                          if (e.key === 'Escape') setCatEditando(null)
+                        }}
+                        onBlur={() => saveEditCat(nombre)}
+                        style={{ fontSize: 12, padding: '2px 6px', flex: 1, minWidth: 0 }}
+                      />
+                    ) : (
+                      <span
+                        style={{ fontSize: 12, color: excluir ? 'var(--text-2)' : 'var(--text)', cursor: 'text', flex: 1 }}
+                        onClick={() => startEditCat(nombre)}
+                        title="Clic para renombrar"
+                      >
+                        {nombre}
+                      </span>
+                    )}
+                    {excluir && !editando && (
+                      <span style={{ fontFamily: 'var(--mono)', fontSize: 8, letterSpacing: '0.1em', color: 'var(--text-3)', textTransform: 'uppercase', flexShrink: 0 }}>EXCL.</span>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', gap: 3, alignItems: 'center', flexShrink: 0 }}>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      title={excluir ? 'Incluir en gastos' : 'Excluir de gastos'}
+                      style={{ opacity: excluir ? 0.9 : 0.3, padding: '3px 6px', fontSize: 9, fontFamily: 'var(--mono)', letterSpacing: '0.05em' }}
+                      onClick={() => toggleExcluir(nombre, excluir)}
+                    >
+                      {excluir ? 'EXCL' : 'excl'}
+                    </button>
+                    <button className="btn btn-ghost btn-sm" style={{ opacity: 0.35, padding: '3px 6px' }} onClick={() => deleteCategoria(nombre)}>
+                      <Trash2 size={10} />
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
           </div>
-          <button className="btn btn-primary" style={{ alignSelf: 'flex-end' }} onClick={addFormaPago}>
-            <Plus size={13} /> Agregar
-          </button>
-        </div>
-      </Section>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+            <div className="form-group" style={{ flex: 1 }}>
+              <label className="form-label">Nueva categoría</label>
+              <input value={newCat} onChange={e => setNewCat(e.target.value)} placeholder="Nombre" onKeyDown={e => e.key === 'Enter' && addCategoria()} />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingBottom: 1 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-2)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                <input type="checkbox" checked={newCatExcluir} onChange={e => setNewCatExcluir(e.target.checked)} style={{ width: 'auto' }} />
+                excluir
+              </label>
+              <button className="btn btn-ghost btn-sm" onClick={addCategoria}><Plus size={11} /></button>
+            </div>
+          </div>
+        </Section>
 
-      {/* Reglas de categorización */}
+        <Section title="Formas de pago">
+          <div style={{ marginBottom: 12 }}>
+            {formasPago.map(fp => (
+              <div key={fp} style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '7px 0', borderBottom: '1px solid var(--border)',
+              }}>
+                <span style={{ fontSize: 12 }}>{fp}</span>
+                <button className="btn btn-ghost btn-sm" style={{ opacity: 0.4, padding: '3px 6px' }} onClick={() => api.deleteFormaPago(fp).then(load)}>
+                  <Trash2 size={10} />
+                </button>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+            <div className="form-group" style={{ flex: 1 }}>
+              <label className="form-label">Nueva forma de pago</label>
+              <input value={newFp} onChange={e => setNewFp(e.target.value)} placeholder="Ej: Efectivo" onKeyDown={e => e.key === 'Enter' && addFormaPago()} />
+            </div>
+            <button className="btn btn-ghost btn-sm" onClick={addFormaPago} style={{ marginBottom: 1 }}><Plus size={11} /></button>
+          </div>
+        </Section>
+      </div>
+
+      {/* Reglas keyword */}
       <Section title="Reglas de categorización (keywords)">
-        <div className="table-wrap" style={{ marginBottom: 16, maxHeight: 320, overflowY: 'auto' }}>
+        <div className="table-wrap" style={{ marginBottom: 14 }}>
           <table>
             <thead>
               <tr>
-                <th>Orden</th>
+                <th style={{ width: 60 }}>Orden</th>
                 <th>Keyword</th>
                 <th>Categoría</th>
-                <th style={{ width: 60 }}></th>
+                <th style={{ width: 50 }}></th>
               </tr>
             </thead>
             <tbody>
-              {reglas.sort((a, b) => a.orden - b.orden).map(r => (
+              {reglas.map(r => (
                 <tr key={r.id}>
-                  <td style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{r.orden}</td>
-                  <td><code style={{ fontSize: 12, background: '#F5F5F3', padding: '2px 6px', borderRadius: 4 }}>{r.keyword}</code></td>
+                  <td className="mono" style={{ color: 'var(--text-3)' }}>{r.orden}</td>
+                  <td className="mono">{r.keyword}</td>
                   <td>
-                    <span
-                      className="badge"
-                      style={{ background: catColor(r.categoria) + '22', color: catColor(r.categoria) }}
-                    >{r.categoria}</span>
+                    <span className="badge" style={{ background: catColor(r.categoria) + '18', color: catColor(r.categoria) }}>
+                      {r.categoria}
+                    </span>
                   </td>
                   <td>
-                    <button
-                      className="btn btn-secondary btn-sm"
-                      style={{ padding: '4px 8px', opacity: 0.5 }}
-                      onClick={() => deleteRegla(r.id)}
-                    >
-                      <Trash2 size={12} />
+                    <button className="btn btn-ghost btn-sm" style={{ opacity: 0.35, padding: '3px 6px' }} onClick={() => api.deleteRegla(r.id).then(load)}>
+                      <Trash2 size={10} />
                     </button>
                   </td>
                 </tr>
@@ -502,61 +462,46 @@ export default function Configuracion() {
             </tbody>
           </table>
         </div>
-
-        <div className="form-row" style={{ flexWrap: 'wrap', gap: 10 }}>
-          <div className="form-group" style={{ flex: '0 0 70px' }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div className="form-group" style={{ flex: '0 0 60px' }}>
             <label className="form-label">Orden</label>
-            <input
-              type="number"
-              placeholder="100"
-              value={newReglaOrden}
-              onChange={e => setNewReglaOrden(e.target.value)}
-            />
+            <input type="number" value={newReglaOrden} onChange={e => setNewReglaOrden(e.target.value)} />
           </div>
           <div className="form-group" style={{ flex: '1 1 160px' }}>
             <label className="form-label">Keyword</label>
-            <input
-              placeholder="ej: pedidosya"
-              value={newReglaKeyword}
-              onChange={e => setNewReglaKeyword(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && addRegla()}
-            />
+            <input value={newReglaKeyword} onChange={e => setNewReglaKeyword(e.target.value)} placeholder="ej: pedidosya" />
           </div>
-          <div className="form-group" style={{ flex: '1 1 140px' }}>
+          <div className="form-group" style={{ flex: '1 1 160px' }}>
             <label className="form-label">Categoría</label>
             <select value={newReglaCat} onChange={e => setNewReglaCat(e.target.value)}>
-              {(Array.isArray(categorias) ? categorias : []).map(c => {
-                const nombre = typeof c === 'object' ? c.nombre : c
-                return <option key={nombre}>{nombre}</option>
-              })}
+              {catNombres.map(c => <option key={c}>{c}</option>)}
             </select>
           </div>
-          <button className="btn btn-primary" style={{ alignSelf: 'flex-end' }} onClick={addRegla}>
-            <Plus size={13} /> Agregar
+          <button className="btn btn-ghost btn-sm" onClick={addRegla} style={{ marginBottom: 1 }}>
+            <Plus size={11} /> Agregar regla
           </button>
-        </div>
-
-        <div className="divider" />
-
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-          <button className="btn btn-secondary" onClick={recategorizar} disabled={recatLoading}>
-            <RefreshCw size={13} style={recatLoading ? { animation: 'spin 1s linear infinite' } : {}} />
-            {recatLoading ? 'Recategorizando...' : 'Recategorizar todos los gastos'}
-          </button>
-          <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-            Aplica las reglas actuales a todos los movimientos que no fueron editados manualmente
-          </span>
-          {recatResult && (
-            <span style={{ color: 'var(--success)', fontSize: 13 }}>
-              ✓ {recatResult.actualizados} movimientos recategorizados
-            </span>
-          )}
         </div>
       </Section>
 
-      <style>{`
-        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-      `}</style>
+      {/* Recategorizar */}
+      <div className="card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--text-2)', marginBottom: 4 }}>
+            Recategorización masiva
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--text-3)' }}>
+            Re-aplica todas las reglas keyword a los gastos no editados manualmente.
+          </div>
+          {recatResult && (
+            <div style={{ marginTop: 6, fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--green)' }}>
+              ✓ {recatResult.actualizados ?? JSON.stringify(recatResult)}
+            </div>
+          )}
+        </div>
+        <button className="btn btn-ghost" onClick={() => setShowRecatModal(true)} disabled={recatLoading}>
+          <RefreshCw size={12} /> {recatLoading ? 'Procesando...' : 'Recategorizar'}
+        </button>
+      </div>
     </div>
   )
 }
